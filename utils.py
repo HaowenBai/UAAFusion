@@ -2,6 +2,9 @@ import numpy as np
 import cv2
 import os
 from skimage.io import imsave
+import torch.nn.functional as F
+import torch
+import torch.nn as nn
 
 def image_read(path, mode='RGB'):
     img_BGR = cv2.imread(path).astype('float32')
@@ -39,3 +42,27 @@ def fuse_CrCb(CrCb1,CrCb2):
 
 def is_grayscale(image):
     return np.all(image[:,:,0] == image[:,:,1]) and np.all(image[:,:,1] == image[:,:,2])
+
+def grad(input):
+    weightx = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+    weighty = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+
+    weightx = weightx.repeat(1, input.shape[1], 1, 1).to(input.device)
+    weighty = weighty.repeat(1, input.shape[1], 1, 1).to(input.device)
+
+    sobelx=F.conv2d(input, weightx, padding=1)
+    sobely=F.conv2d(input, weighty, padding=1)
+    return torch.abs(sobelx)+torch.abs(sobely)
+
+def CE_Loss(inputs, target, cls_weights=torch.ones([15]), num_classes=0):
+    cls_weights=cls_weights.cuda()
+    n, c, h, w = inputs.size()
+    nt, ht, wt = target.size()
+    if h != ht and w != wt:
+        inputs = F.interpolate(inputs, size=(ht, wt), mode="bilinear", align_corners=True)
+
+    temp_inputs = inputs.transpose(1, 2).transpose(2, 3).contiguous().view(-1, c)
+    temp_target = target.view(-1)
+
+    CE_loss  = nn.CrossEntropyLoss(weight=cls_weights, ignore_index=num_classes)(temp_inputs, temp_target)
+    return CE_loss
